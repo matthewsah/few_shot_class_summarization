@@ -12,10 +12,10 @@ df = df.sample(frac=1, random_state=42).reset_index(drop=True)
 # Split the DataFrame
 # 356 eval samples (sample size)
 eval_samples = df.iloc[:356]
-# 1000 training samples
-initial_train_samples = df.iloc[356:1356]
+# 900 training samples
+initial_train_samples = df.iloc[356:1256]
 # remaining samples
-remaining_samples = df.iloc[1356:]
+remaining_samples = df.iloc[1256:]
 
 # Save the splits into seperate JSONL files
 eval_samples.to_json('./data/eval_samples.jsonl', orient='records', lines=True)
