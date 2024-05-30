@@ -1,45 +1,52 @@
 import os
 import json
 from langchain.prompts import FewShotPromptTemplate, PromptTemplate
-from langchain_community.llms import OpenAI
+from langchain_openai import OpenAI
 from langchain_chroma import Chroma
+from langchain_community.document_loaders import TextLoader
+from langchain_community.embeddings.sentence_transformer import (
+    SentenceTransformerEmbeddings,
+)
+from langchain_text_splitters import CharacterTextSplitter
 from langchain_core.example_selectors import SemanticSimilarityExampleSelector
 from langchain_openai import OpenAIEmbeddings
+from langchain.docstore.document import Document
 
 # Ensure the environment variable is set
 assert 'OPENAI_API_KEY' in os.environ, "The OpenAI API key must be set in the environment."
 
 # Define the persistent directory for Chroma
-chroma_directory = "./chroma_persistent_directory"
+CHROMA_DIRECTORY = "./chroma_persistent_directory"
 
-# Initialize the embedding function
-embeddings = OpenAIEmbeddings()
+if not os.path.isdir(CHROMA_DIRECTORY):
+    # Load examples from the JSONL file
+    documents = []
+    with open('./data/initial_train_samples.jsonl', 'r', encoding='utf-8') as file:
+        for line in file:
+            if line:
+                data = json.loads(line)
+                id = str(data['id'])
+                data['summary'] = ' '.join(data['summary'])
+                del data['project']
+                del data['id']
+                page_content = json.dumps(data)
+                document = Document(page_content=page_content, metadata={"id": id})
+                documents.append(document)
 
-# Initialize the Chroma vector store with the embedding function
-chroma = Chroma(persist_directory=chroma_directory, embedding_function=embeddings)
+    # Initialize the embedding function
+    embeddings = OpenAIEmbeddings()
 
-# Load examples from the JSONL file
-examples = []
-with open('./data/initial_train_samples.jsonl', 'r', encoding='utf-8') as file:
-    for line in file:
-        if line:
-            data = json.loads(line)
-            data['summary'] = ' '.join(data['summary'])
-            examples.append(data.copy())
-
-# Check if the directory is empty to determine if the Chroma vector store is new
-is_chroma_new = not os.path.exists(chroma_directory) or not os.listdir(chroma_directory)
-
-# Add examples to the Chroma vector store if it is new
-if is_chroma_new:
-    for example in examples:
-        embedding = embeddings.embed_documents(example['content'])
-        chroma.add_texts([example['content']], [embedding])
+    # Initialize the Chroma vector store with the embedding function
+    vectorstore = Chroma.from_documents(documents=documents, embedding=embeddings, persist_directory=CHROMA_DIRECTORY)
+else:
+    embeddings = OpenAIEmbeddings()
+    vectorstore = Chroma(embedding_function=embeddings, persist_directory=CHROMA_DIRECTORY)
 
 # Create the example selector
 example_selector = SemanticSimilarityExampleSelector(
-    vectorstore=chroma,  # Corrected parameter name
-    k=10
+    vectorstore=vectorstore,
+    k=3, #change to 10
+    input_keys=['content']
 )
 
 # Test on one sample first -- will need to change when collecting data
@@ -51,19 +58,27 @@ with open('./data/eval_samples.jsonl', 'r', encoding='utf-8') as file:
             first_sample['summary'] = ' '.join(first_sample['summary'])
             break
 
-project, content, summary = first_sample['project'], first_sample['content'], first_sample['summary']
-selected_examples = example_selector.select_examples({"content": content})
+content, summary = first_sample['content'], first_sample['summary']
+print(content, summary)
+selected_example_id_dicts = example_selector.select_examples({"content": content})
+
+selected_examples = [json.loads(vectorstore.get(where={'id': selected_example_id_dict['id']})['documents'][0]) for selected_example_id_dict in selected_example_id_dicts]
+
+print(selected_examples[0], type(selected_examples[0]), len(selected_examples[0]))
 
 # Convert selected examples to the format required by FewShotPromptTemplate
 formatted_examples = [
-    {"project": ex['project'], "content": ex['content'], "summary": ex['summary']}
+    {"content": ex['content'], "summary": ex['summary']}
     for ex in selected_examples
 ]
 
+print(formatted_examples)
+
 # Create an example prompt template
 example_prompt = PromptTemplate(
-    input_variables=['project', 'content', 'summary'],
-    template="Project: {project}\nContent: {content}\nSummary: {summary}"
+    input_variables=['content', 'summary'],
+    template="content: {{ content }}\nsummary: {{ summary }}",
+    template_format="jinja2"
 )
 
 # Create the few-shot prompt template using the selected examples
@@ -71,15 +86,18 @@ few_shot_prompt = FewShotPromptTemplate(
     examples=formatted_examples,
     example_prompt=example_prompt,
     prefix="Summarize the following Java Class.",
-    suffix="Project: {project}\nContent: {content}\nSummary:",
-    input_variables=["project", "content"]
+    suffix='content: {{ content }}\nsummary:',
+    input_variables=["content"],
+    template_format="jinja2"
 )
 
 # Initialize the OpenAI LLM with the gpt-3.5-turbo-0125 model
-llm = OpenAI(model="gpt-3.5-turbo-0125")
+llm = OpenAI(model="gpt-3.5-turbo-0125", temperature=0)
+# Escape curly braces in the content
+def escape_curly_braces(text):
+    return text.replace("{", "{{").replace("}", "}}")
 
-# Now you can use the few_shot_prompt with the LLM
-input_text = few_shot_prompt.format(project=project, content=content)
+input_text = few_shot_prompt.format(content=content)
 print("Generated Prompt:")
 print(input_text)
 response = llm.generate([input_text])
@@ -88,4 +106,4 @@ print(response)
 with open('output.txt', 'w') as output_file:
     output_file.write(response + '\n')
 
-# When we are running on the entire dataset we will need to put a summary on each line
+# # When we are running on the entire dataset we will need to put a summary on each line
