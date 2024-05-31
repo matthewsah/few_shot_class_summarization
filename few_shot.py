@@ -1,7 +1,7 @@
 import os
 import json
 from langchain.prompts import FewShotPromptTemplate, PromptTemplate
-from langchain_openai import OpenAI
+from langchain_openai import ChatOpenAI
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import TextLoader
 from langchain_community.embeddings.sentence_transformer import (
@@ -45,7 +45,7 @@ else:
 # Create the example selector
 example_selector = SemanticSimilarityExampleSelector(
     vectorstore=vectorstore,
-    k=3, #change to 10
+    k=2, #change to 10
     input_keys=['content']
 )
 
@@ -92,18 +92,18 @@ few_shot_prompt = FewShotPromptTemplate(
 )
 
 # Initialize the OpenAI LLM with the gpt-3.5-turbo-0125 model
-llm = OpenAI(model="gpt-3.5-turbo-0125", temperature=0)
-# Escape curly braces in the content
-def escape_curly_braces(text):
-    return text.replace("{", "{{").replace("}", "}}")
+llm = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0)
 
 input_text = few_shot_prompt.format(content=content)
 print("Generated Prompt:")
 print(input_text)
-response = llm.generate([input_text])
-print("Generated Response:")
+messages = [
+    ('system', 'You are a helpful assistant that summarizes code.'),
+    ('human', input_text)
+]
+response = llm.invoke(messages)
 print(response)
 with open('output.txt', 'w') as output_file:
-    output_file.write(response + '\n')
+    output_file.write(str(response) + '\n')
 
 # # When we are running on the entire dataset we will need to put a summary on each line
