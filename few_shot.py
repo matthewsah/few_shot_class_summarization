@@ -11,12 +11,15 @@ from langchain_text_splitters import CharacterTextSplitter
 from langchain_core.example_selectors import SemanticSimilarityExampleSelector
 from langchain_openai import OpenAIEmbeddings
 from langchain.docstore.document import Document
+import tiktoken
 
 # Ensure the environment variable is set
 assert 'OPENAI_API_KEY' in os.environ, "The OpenAI API key must be set in the environment."
 
 # Define the persistent directory for Chroma
 CHROMA_DIRECTORY = "./chroma_persistent_directory"
+MEAN_CONTENT_TOKEN_LEN = 865.3
+tokenizer = tiktoken.encoding_for_model('gpt-4o')
 
 if not os.path.isdir(CHROMA_DIRECTORY):
     # Load examples from the JSONL file
@@ -45,18 +48,21 @@ else:
 # Create the example selector
 example_selector = SemanticSimilarityExampleSelector(
     vectorstore=vectorstore,
-    k=2, #change to 10
+    k=10, #change to 10
     input_keys=['content']
 )
 
 # Test on one sample first -- will need to change when collecting data
 first_sample = None
+b = False
 with open('./data/eval_samples.jsonl', 'r', encoding='utf-8') as file:
     for line in file:
         if line:
             first_sample = json.loads(line)
             first_sample['summary'] = ' '.join(first_sample['summary'])
-            break
+            if b:
+                break
+            b = True
 
 content, summary = first_sample['content'], first_sample['summary']
 print(content, summary)
@@ -85,25 +91,27 @@ example_prompt = PromptTemplate(
 few_shot_prompt = FewShotPromptTemplate(
     examples=formatted_examples,
     example_prompt=example_prompt,
-    prefix="Summarize the following Java Class.",
-    suffix='content: {{ content }}\nsummary:',
+    prefix="Example summaries:\n", 
+    suffix='Now, summarize the following Java class concisely, following the format of the provided examples\ncontent: {{ content }}\nsummary: ',
     input_variables=["content"],
     template_format="jinja2"
 )
 
-# Initialize the OpenAI LLM with the gpt-3.5-turbo-0125 model
-llm = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0)
+# Initialize the OpenAI LLM with the gpt-4o model
+llm = ChatOpenAI(model="gpt-4o", temperature=0)
 
 input_text = few_shot_prompt.format(content=content)
 print("Generated Prompt:")
 print(input_text)
+with open('input.txt', 'w') as input_file:
+    input_file.write(input_text + '\n----------------\n')
 messages = [
-    ('system', 'You are a helpful assistant that summarizes code.'),
+    ('system', 'You are a helpful assistant that summarizes Java classes.'),
     ('human', input_text)
 ]
 response = llm.invoke(messages)
 print(response)
 with open('output.txt', 'w') as output_file:
-    output_file.write(str(response) + '\n')
+    output_file.write(str(response) + '\n----------------\n')
 
 # # When we are running on the entire dataset we will need to put a summary on each line
