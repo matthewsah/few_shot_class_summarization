@@ -1,14 +1,32 @@
 import pandas as pd
 import tiktoken
+import json
+import statistics
 
 # Define the file path to the JSONL data file
 PATH_TO_DATASET = './data/data.jsonl'
 
-# The mean tokens of content
-MEAN_CONTENT_TOKEN_LEN = 865.3
-
 # Tokenizer
 tokenizer = tiktoken.encoding_for_model('gpt-4o')
+
+def get_mean_content_len(jsonl_file):
+    token_lengths = []
+    with open(jsonl_file, 'r') as file:
+        for line in file:
+            entry = json.loads(line)
+            content = entry['content']
+            tokens = tokenizer.encode(content)
+            token_lengths.append(len(tokens))
+    
+    return statistics.mean(token_lengths)
+
+def content_is_less_than_mean_len(content: str):
+    return len(tokenizer.encode(content)) < MEAN_CONTENT_TOKEN_LEN
+
+# The mean tokens of content
+MEAN_CONTENT_TOKEN_LEN = get_mean_content_len(PATH_TO_DATASET)
+print(MEAN_CONTENT_TOKEN_LEN)
+
 
 # Read the JSONL file into a DataFrame
 df = pd.read_json(PATH_TO_DATASET, lines=True)
@@ -16,14 +34,12 @@ df = pd.read_json(PATH_TO_DATASET, lines=True)
 # Shuffle the DataFrame
 df = df.sample(frac=1, random_state=42).reset_index(drop=True)
 
-def content_is_less_than_mean_len(content: str):
-    return len(tokenizer.encode(content)) < MEAN_CONTENT_TOKEN_LEN
-
 # Split the DataFrame
-# 356 eval samples (sample size)
+# eval_samples: 356 eval samples (sample size)
 eval_samples = df.iloc[:356]
 
-# 1000 training samples that are all under the length of mean token len
+# initial_train_samples: 1000 samples under the length of mean token len which will be stored in the vectorstore
+# remaining_samples: remaining samples
 cur_sample = 356
 initial_train_samples = []
 remaining_samples = []
